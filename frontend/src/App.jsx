@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { HashRouter, Route, Routes } from 'react-router-dom'
+import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import DesktopLayout from './layouts/DesktopLayout.jsx'
 import MobileLayout from './layouts/MobileLayout.jsx'
 import Login from './pages/Login.jsx'
 import Home from './pages/Home.jsx'
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(sessionStorage.getItem("auth_user")))
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
 
   useEffect(() => {
@@ -23,19 +24,28 @@ function App() {
           <Route
             path="/"
             element={
-              <Layout>
-                <Login />
-              </Layout>
+              isAuthenticated
+                ? <Navigate to="/home" replace />
+                : (
+                  <Layout>
+                    <Login onAuthSuccess={() => setIsAuthenticated(true)} />
+                  </Layout>
+                )
             }
           />
           <Route
             path="/home"
             element={
-              <Layout>
-                <Home />
-              </Layout>
+              isAuthenticated
+                ? (
+                  <Layout>
+                    <Home />
+                  </Layout>
+                )
+                : <Navigate to="/" replace />
             }
           />
+          <Route path="*" element={<Navigate to={isAuthenticated ? "/home" : "/"} replace />} />
         </Routes>
       </HashRouter>
     </div>
