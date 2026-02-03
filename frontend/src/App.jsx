@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { HashRouter, Route, Routes } from 'react-router-dom'
 import DesktopLayout from './layouts/DesktopLayout.jsx'
 import MobileLayout from './layouts/MobileLayout.jsx'
 import Login from './pages/Login.jsx'
@@ -18,7 +18,7 @@ function App() {
 
   return (
     <div className='w-full'>
-      <BrowserRouter>
+      <HashRouter>
         <Routes>
           <Route
             path="/"
@@ -37,7 +37,7 @@ function App() {
             }
           />
         </Routes>
-      </BrowserRouter>
+      </HashRouter>
     </div>
   )
 }
