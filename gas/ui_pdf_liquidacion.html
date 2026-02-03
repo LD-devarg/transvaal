@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial; background:#f6f7f9; padding:20px; }
+    h3 { margin-top:0; }
+    select { width:100%; padding:10px; margin-top:8px; border-radius:6px; border:1px solid #ccc; }
+    button { 
+      padding:10px 16px; 
+      background:#1a73e8; 
+      color:#fff; 
+      border:none; 
+      border-radius:6px;
+      margin-top:15px; 
+      cursor:pointer; 
+      font-weight:600;
+      width:100%;
+    }
+    button:hover { filter:brightness(.96); }
+
+    /* Modal mensaje */
+    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.3); 
+             z-index:9999; justify-content:center; align-items:center; }
+    .modal-box { background:#fff; padding:20px; border-radius:10px; 
+                 text-align:center; width:320px; }
+    .modal-box.success { border-left:6px solid #188038; }
+    .modal-box.error   { border-left:6px solid #d93025; }
+
+    /* Loader */
+    #loader {
+      display:none;
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,0.3);
+      z-index:9998;
+      justify-content:center;
+      align-items:center;
+      color:white;
+      font-size:16px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h3>Generar PDF de Liquidación</h3>
+
+  <label for="liqSel">Seleccioná la Liquidación:</label>
+  <select id="liqSel"></select>
+
+  <button onclick="generarPDF()">Generar PDF</button>
+
+  <!-- Loader -->
+  <div id="loader">Generando PDF...</div>
+
+  <!-- Modal mensaje -->
+  <div id="msgModal" class="modal">
+    <div id="msgBox" class="modal-box">
+      <p id="msgText"></p>
+      <button onclick="cerrarMsg()">Cerrar</button>
+    </div>
+  </div>
+
+<script>
+
+  // Mostrar/Ocultar loader
+  function showLoader(){ document.getElementById("loader").style.display = "flex"; }
+  function hideLoader(){ document.getElementById("loader").style.display = "none"; }
+
+  // Modal mensaje
+  function showMsg(text, ok=true){
+    const box = document.getElementById("msgBox");
+    box.className = "modal-box " + (ok ? "success" : "error");
+    document.getElementById("msgText").innerText = text;
+    document.getElementById("msgModal").style.display = "flex";
+  }
+  function cerrarMsg(){ document.getElementById("msgModal").style.display = "none"; }
+
+  // Cargar las liquidaciones (solo desde fila 4)
+  google.script.run.withSuccessHandler(list => {
+      const sel = document.getElementById("liqSel");
+      sel.innerHTML = "";
+
+      if (!list.length){
+        sel.innerHTML = "<option>No hay liquidaciones disponibles</option>";
+        return;
+      }
+
+      sel.innerHTML = list.map(l =>
+        `<option value="${l.numero}">
+           ${l.numero} | ${l.proveedor} | ${l.fecha} | ${l.estado}
+         </option>`
+      ).join("");
+
+  }).withFailureHandler(err => {
+      showMsg("Error cargando liquidaciones: " + err.message, false);
+  }).obtenerLiquidaciones();
+
+
+  // GENERAR PDF
+  function generarPDF(){
+    const nro = document.getElementById("liqSel").value;
+    if (!nro){
+      showMsg("Seleccioná una liquidación.", false);
+      return;
+    }
+
+    showLoader();
+
+    google.script.run.withSuccessHandler(res => {
+        hideLoader();
+        showMsg("PDF generado correctamente.\n\n" + res.pdfUrl, true);
+    })
+    .withFailureHandler(err => {
+        hideLoader();
+        showMsg("Error generando PDF: " + err.message, false);
+    })
+    .generarPDFLiquidacion(nro);
+  }
+
+</script>
+
+</body>
+</html>
+

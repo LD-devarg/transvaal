@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" /><base target="_top">
+  <style>
+    body{font-family:Arial,sans-serif;background:#f6f7f9;margin:0;padding:16px}
+    h2{margin:0 0 12px;text-align:center}
+    .toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+    select,input[type="date"]{padding:8px;border:1px solid #ccc;border-radius:8px;background:#fff}
+    table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden}
+    th,td{padding:8px;border-bottom:1px solid #eee;font-size:12px}
+    th{background:#e9ecef}
+    .center{text-align:center}
+    .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+    button{background:#1a73e8;color:#fff;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;font-weight:600}
+    button.secondary{background:#6c757d}
+    button:hover{filter:brightness(.96)}
+    .totals{display:flex;gap:18px;flex-wrap:wrap;margin-top:8px;font-size:13px}
+    .totals .box{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px}
+    .note{font-size:12px;color:#666;margin-top:6px}
+
+    .modal{display:none;position:fixed;z-index:9998;inset:0;background:rgba(0,0,0,.4);justify-content:center;align-items:center}
+    .modal-content{background:#fff;padding:18px 22px;border-radius:12px;box-shadow:0 3px 12px rgba(0,0,0,.25);max-width:520px;text-align:center}
+    .modal-content.success{border-left:6px solid #188038}
+    .modal-content.error{border-left:6px solid #d93025}
+    #msgClose{background:#1a73e8;color:#fff;border:none;border-radius:8px;padding:8px 14px;margin-top:10px;cursor:pointer}
+
+    .loading-overlay{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.35);display:none;flex-direction:column;align-items:center;justify-content:center;backdrop-filter:blur(1px)}
+    .spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,.4);border-top-color:#1a73e8;border-radius:50%;animation:spin .9s linear infinite}
+    .loading-text{margin-top:10px;color:#fff;font-weight:600;text-shadow:0 1px 2px rgba(0,0,0,.25)}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    .row-disabled{opacity:.55}
+  </style>
+</head>
+
+<body>
+
+  <h2>Armar liquidación</h2>
+
+  <div class="toolbar">
+    <label>Proveedor:
+      <select id="proveedor"></select>
+    </label>
+
+    <label>Desde: <input type="date" id="desde"></label>
+    <label>Hasta: <input type="date" id="hasta"></label>
+
+    <button class="secondary" id="btnBuscar">Buscar</button>
+  </div>
+
+  <div class="totals">
+    <div class="box">Viajes: <b id="t_viajes">0</b></div>
+    <div class="box">Total s/IVA: <b id="t_siva">$ 0</b></div>
+    <div class="box">Total c/IVA: <b id="t_civa">$ 0</b></div>
+    <div class="box">Saldo Proveedor: <b id="t_saldo">$ 0</b></div>
+    <div class="box">Adeudado final: <b id="t_final">$ 0</b></div>
+  </div>
+
+  <div class="note" id="noteEstado"></div>
+
+  <table id="tabla">
+    <thead>
+      <tr>
+        <th class="center"><input type="checkbox" id="chkAll" checked></th>
+        <th class="center">N° Viaje</th>
+        <th class="center">Fecha</th>
+        <th class="center">Cliente</th>
+        <th class="center">Salida</th>
+        <th class="center">Tarifa</th>
+        <th class="center">Cubiertas</th>
+        <th class="center">Adelanto</th>
+        <th class="center">Lts</th>
+        <th class="center">$ Comb</th>
+        <th class="center">Total Comb</th>
+        <th class="center">Remito</th>
+        <th class="center">Estado</th>
+      </tr>
+    </thead>
+
+    <tbody></tbody>
+  </table>
+
+  <div class="actions">
+    <button class="secondary" id="btnCerrar">Cerrar</button>
+    <button id="btnGenerar">Generar liquidación</button>
+  </div>
+
+  <!-- Modal -->
+  <div id="msgModal" class="modal">
+    <div id="msgBox" class="modal-content">
+      <p id="msgText"></p>
+      <button id="msgClose">Cerrar</button>
+    </div>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Procesando...</div>
+  </div>
+
+<script>
+const fmt = n => Number(n||0).toLocaleString('es-AR',{style:'currency',currency:'ARS'});
+
+let rows = [];
+
+/*==========================*
+ * UTILIDADES UI
+ *==========================*/
+function showLoading(text){
+  const o=document.getElementById('loadingOverlay');
+  if(text) o.querySelector('.loading-text').textContent=text;
+  o.style.display='flex';
+}
+function hideLoading(){
+  document.getElementById('loadingOverlay').style.display='none';
+}
+function showMsg(msg, ok=true){
+  const modal=document.getElementById('msgModal');
+  const box=document.getElementById('msgBox');
+  document.getElementById('msgText').textContent=msg;
+  box.className='modal-content '+(ok?'success':'error');
+  modal.style.display='flex';
+}
+document.getElementById('msgClose').onclick=()=> {
+  document.getElementById('msgModal').style.display='none';
+};
+
+/*==========================*
+ * RENDER TABLA
+ *==========================*/
+function renderTable(data){
+  const tb=document.querySelector('#tabla tbody');
+  tb.innerHTML='';
+
+  let habilitados = 0, noHabilitados = 0;
+
+  data.forEach(r=>{
+    const canSelect = r.seleccionable === true;
+
+    if (canSelect) habilitados++; else noHabilitados++;
+
+    const tr=document.createElement('tr');
+    if(!canSelect) tr.classList.add('row-disabled');
+
+    tr.innerHTML = `
+      <td class="center">
+        <input type="checkbox" class="rowchk" data-id="${r.nViaje}"
+          ${canSelect ? 'checked' : 'disabled'}>
+      </td>
+      <td class="center">${r.nViaje}</td>
+      <td class="center">${r.fecha}</td>
+      <td class="center">${r.cliente||''}</td>
+      <td class="center">${r.salida||''}</td>
+      <td class="center">${fmt(r.tarifa)}</td>
+      <td class="center">${fmt(r.cubiertas)}</td>
+      <td class="center">${fmt(r.adelanto)}</td>
+      <td class="center">${r.lts||0}</td>
+      <td class="center">${fmt(r.precioComb)}</td>
+      <td class="center">${fmt(r.totalComb)}</td>
+      <td class="center">${r.remito||''}</td>
+      <td class="center">${r.estado}</td>
+    `;
+    tb.appendChild(tr);
+  });
+
+  document.getElementById('noteEstado').textContent =
+    `Seleccionables (Habilitados): ${habilitados} · No seleccionables: ${noHabilitados}`;
+
+  recalcTotals();
+}
+
+/*==========================*
+ * CALCULAR TOTALES
+ *==========================*/
+function recalcTotals(){
+  const checks=[...document.querySelectorAll('.rowchk')];
+  const on=new Set(checks.filter(c=>c.checked).map(c=>c.dataset.id));
+
+  const sel=rows.filter(r=>on.has(String(r.nViaje)));
+
+  const siva = sel.reduce((a,r)=>a+(+r.tarifa||0),0);
+  const civa = siva * 1.21;
+  const saldo= sel.reduce((a,r)=>a+(+r.cubiertas||0)+(+r.adelanto||0)+(+r.totalComb||0),0);
+  const final= civa - saldo;
+
+  document.getElementById('t_viajes').textContent = sel.length;
+  document.getElementById('t_siva').textContent   = fmt(siva);
+  document.getElementById('t_civa').textContent   = fmt(civa);
+  document.getElementById('t_saldo').textContent  = fmt(saldo);
+  document.getElementById('t_final').textContent  = fmt(final);
+}
+
+/*==========================*
+ * BUSCAR VIAJES
+ *==========================*/
+function buscar(){
+  const proveedor=document.getElementById('proveedor').value;
+  const desde=document.getElementById('desde').value;
+  const hasta=document.getElementById('hasta').value;
+
+  if(!proveedor) return showMsg("Elegí un proveedor", false);
+
+  showLoading('Buscando viajes...');
+
+  google.script.run.withSuccessHandler(data=>{
+    hideLoading();
+    rows=data||[];
+    renderTable(rows);
+  }).withFailureHandler(err=>{
+    hideLoading(); showMsg("Error: "+err.message,false);
+  }).obtenerViajesCandidatos(proveedor, desde, hasta);
+}
+
+/*==========================*
+ * GENERAR LIQUIDACIÓN
+ *==========================*/
+function generar(){
+
+  const proveedor=document.getElementById('proveedor').value;
+  const desde=document.getElementById('desde').value;
+  const hasta=document.getElementById('hasta').value;
+
+  if(!proveedor) return showMsg("Elegí un proveedor", false);
+
+  const items=[...document.querySelectorAll('.rowchk')].map(c=>({
+    nViaje: c.dataset.id,
+    incluir: c.checked
+  }));
+
+  if(items.filter(i=>i.incluir).length === 0)
+    return showMsg("No hay viajes seleccionados", false);
+
+  showLoading('Generando liquidación...');
+
+  google.script.run.withSuccessHandler(res=>{
+    hideLoading();
+    showMsg(
+      `Liquidación ${res.numero} generada correctamente.\n` +
+      `Viajes: ${res.cantidadViajes}\n` +
+      `Total s/IVA: ${fmt(res.totales.totalSinIVA)}\n` +
+      `Total c/IVA: ${fmt(res.totales.totalConIVA)}\n` +
+      `Saldo Proveedor: ${fmt(res.totales.saldoProveedor)}\n` +
+      `Adeudado Final: ${fmt(res.totales.adeudadoFinal)}`,
+      true
+    );
+  }).withFailureHandler(err=>{
+    hideLoading();
+    showMsg("Error al generar: "+err.message,false);
+  }).generarLiquidacion({ proveedor, desdeISO:desde, hastaISO:hasta, items });
+}
+
+/*==========================*
+ * CARGA INICIAL
+ *==========================*/
+function loadProveedores(){
+  showLoading("Cargando proveedores...");
+  google.script.run.withSuccessHandler(list=>{
+    hideLoading();
+    const sel=document.getElementById('proveedor');
+    sel.innerHTML='<option value="">-- Elegí proveedor --</option>' +
+      (list||[]).map(p=> `<option>${p}</option>`).join('');
+  }).withFailureHandler(err=>{
+    hideLoading(); showMsg("Error cargando proveedores: "+err.message,false);
+  }).getProveedores();
+}
+
+document.getElementById('chkAll').addEventListener('change',e=>{
+  document.querySelectorAll('.rowchk:not([disabled])')
+    .forEach(c=>c.checked=e.target.checked);
+  recalcTotals();
+});
+
+document.getElementById('btnBuscar').onclick = buscar;
+document.getElementById('btnGenerar').onclick = generar;
+document.getElementById('btnCerrar').onclick = ()=>google.script.host.close();
+
+document.addEventListener('change', e=>{
+  if(e.target.classList.contains('rowchk')) recalcTotals();
+});
+
+// Fechas por defecto
+const d=new Date();
+document.getElementById('desde').value = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0,10);
+document.getElementById('hasta').value = d.toISOString().slice(0,10);
+
+// Init
+loadProveedores();
+</script>
+</body>
+</html>
