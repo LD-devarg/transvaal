@@ -2,13 +2,49 @@ import { useState } from "react";
 import FormViajes from "../components/FormViajes";
 import FormGastos from "../components/FormGastos";
 import Button from "../components/Button";
+import { saveGasto, saveViaje } from "../services/authApi";
 
 export default function Home() {
     const [activeForm, setActiveForm] = useState("viajes");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [statusMessage, setStatusMessage] = useState("");
+    const [statusType, setStatusType] = useState("");
     const logoSrc = `${import.meta.env.BASE_URL}logo_transvaal.png`;
 
+    const handleViajeSubmit = async (payload) => {
+        setIsSubmitting(true);
+        setStatusMessage("");
+        setStatusType("");
+        try {
+            await saveViaje(payload);
+            setStatusType("success");
+            setStatusMessage("Viaje guardado correctamente.");
+        } catch (error) {
+            setStatusType("error");
+            setStatusMessage(error.message || "No se pudo guardar el viaje.");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleGastoSubmit = async (payload) => {
+        setIsSubmitting(true);
+        setStatusMessage("");
+        setStatusType("");
+        try {
+            await saveGasto(payload);
+            setStatusType("success");
+            setStatusMessage("Gasto guardado correctamente.");
+        } catch (error) {
+            setStatusType("error");
+            setStatusMessage(error.message || "No se pudo guardar el gasto.");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     return (
-        <div className='flex h-full w-full flex-col items-center justify-start gap-6 pt-10 bg-gray-100 dark:bg-gray-900'>
+        <div className='flex h-full w-full flex-col items-center justify-start gap-6 overflow-y-hidden pt-5 bg-gray-100 dark:bg-gray-900'>
             <img src={logoSrc} className='h-30 w-30 rounded-full' alt="Logo" />
             <div className="flex w-full gap-4 justify-center flex-row">
                 <Button
@@ -25,8 +61,14 @@ export default function Home() {
                 </Button>
             </div>
 
-            {activeForm === "viajes" ? <FormViajes /> : <FormGastos />}
-            <Button onClick={() => alert('Button clicked!')} className="btn">Enviar</Button>
+            {activeForm === "viajes"
+                ? <FormViajes onSubmit={handleViajeSubmit} isSubmitting={isSubmitting} />
+                : <FormGastos onSubmit={handleGastoSubmit} isSubmitting={isSubmitting} />}
+            {statusMessage ? (
+                <p className={statusType === "success" ? "text-green-600" : "text-red-600"}>
+                    {statusMessage}
+                </p>
+            ) : null}
         </div>
     )
 }

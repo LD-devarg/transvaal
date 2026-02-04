@@ -41,3 +41,20 @@ function precargarViajes(proveedor, desdeISO, hastaISO) {
 
   return viajes;
 }
+
+function getCachedJson_(key) {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(key);
+  if (!cached) return null;
+
+  try {
+    return JSON.parse(cached);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function putCachedJson_(key, value, ttlSeconds) {
+  const cache = CacheService.getScriptCache();
+  cache.put(key, JSON.stringify(value), ttlSeconds);
+}
