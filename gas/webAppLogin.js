@@ -5,6 +5,7 @@ const PROVIDERS_SHEET_NAME = "Proveedores";
 const SALIDAS_SHEET_NAME = "Salidas";
 const CACHE_TTL_OPTIONS_SECONDS = 1800; // 30 min
 const CACHE_TTL_SALIDAS_SECONDS = 900; // 15 min
+const CACHE_TTL_VIAJES_SIN_REMITO_SECONDS = 300; // 5 min
 
 function doGet(e) {
   const action = e && e.parameter ? String(e.parameter.action || "") : "";
@@ -28,6 +29,12 @@ function doGet(e) {
   if (action === "save_gasto") {
     return saveGasto_(e.parameter || {});
   }
+  if (action === "viajes_sin_remito") {
+    return getViajesSinRemito_();
+  }
+  if (action === "save_remito") {
+    return saveRemito_(e.parameter || {});
+  }
 
   return jsonResponse({ ok: true, message: "web app activa" });
 }
@@ -44,6 +51,9 @@ function doPost(e) {
     }
     if (payload.action === "save_gasto") {
       return saveGasto_(payload);
+    }
+    if (payload.action === "save_remito") {
+      return saveRemito_(payload);
     }
 
     return jsonResponse({ ok: false, message: "Accion no soportada" });
@@ -245,6 +255,7 @@ function saveViaje_(payload) {
 
 function saveGasto_(payload) {
   const fecha = String(payload.fecha || "").trim();
+  const proveedor = String(payload.proveedor || "").trim();
   const cubiertas = toNumber_(payload.cubiertas);
   const adelantoOtros = toNumber_(payload.adelantoOtros);
   const ltsComb = toNumber_(payload.ltsComb);
@@ -262,14 +273,19 @@ function saveGasto_(payload) {
   }
 
   const colMap = getHeaderColumns_(sheet, 3);
+  const proveedorCol = colMap.proveedor || colMap.chofer;
   const required = ["fecha", "cubiertas", "adelanto_otros", "lts_comb", "monto_comb", "total_comb", "remito_comb"];
   const missing = required.filter(function (key) { return !colMap[key]; });
+  if (!proveedorCol) {
+    missing.push("proveedor/chofer");
+  }
   if (missing.length > 0) {
     return jsonResponse({ ok: false, message: "Faltan columnas en Gastos: " + missing.join(", ") });
   }
 
-  const nextRow = getNextDataRow_(sheet, 4, [colMap.fecha, colMap.cubiertas, colMap.lts_comb, colMap.monto_comb]);
+  const nextRow = getNextDataRow_(sheet, 4, [colMap.fecha, proveedorCol, colMap.cubiertas, colMap.lts_comb, colMap.monto_comb]);
   sheet.getRange(nextRow, colMap.fecha).setValue(fecha);
+  sheet.getRange(nextRow, proveedorCol).setValue(proveedor);
   sheet.getRange(nextRow, colMap.cubiertas).setValue(cubiertas);
   sheet.getRange(nextRow, colMap.adelanto_otros).setValue(adelantoOtros);
   sheet.getRange(nextRow, colMap.lts_comb).setValue(ltsComb);
@@ -278,6 +294,111 @@ function saveGasto_(payload) {
   sheet.getRange(nextRow, colMap.remito_comb).setValue(remitoComb);
 
   return jsonResponse({ ok: true, row: nextRow, message: "Gasto guardado" });
+}
+
+function saveRemito_(payload) {
+  const nViaje = String(payload.nViaje || "").trim();
+  const remito = String(payload.remito || "").trim();
+
+  if (!nViaje || !remito) {
+    return jsonResponse({ ok: false, message: "Nro. de viaje y remito son obligatorios" });
+  }
+
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("Viajes");
+  if (!sheet) {
+    return jsonResponse({ ok: false, message: "No existe la hoja Viajes" });
+  }
+
+  const colMap = getHeaderColumns_(sheet, 3);
+  const nViajeCol = colMap.n_viaje;
+  const remitoCol = getViajesRemitoColumn_(sheet);
+  if (!nViajeCol || !remitoCol) {
+    return jsonResponse({ ok: false, message: "No se encontraron columnas N° Viaje o Remito" });
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 4) {
+    return jsonResponse({ ok: false, message: "No hay viajes cargados" });
+  }
+
+  const rowCount = lastRow - 3;
+  const nViajes = sheet.getRange(4, nViajeCol, rowCount, 1).getValues();
+  let foundRow = -1;
+  for (var i = 0; i < nViajes.length; i++) {
+    if (String(nViajes[i][0] || "").trim() === nViaje) {
+      foundRow = i + 4;
+      break;
+    }
+  }
+
+  if (foundRow === -1) {
+    return jsonResponse({ ok: false, message: "No se encontro el viaje seleccionado" });
+  }
+
+  const currentRemito = String(sheet.getRange(foundRow, remitoCol).getValue() || "").trim();
+  if (currentRemito) {
+    return jsonResponse({ ok: false, message: "Ese viaje ya tiene remito cargado" });
+  }
+
+  sheet.getRange(foundRow, remitoCol).setValue(remito);
+  clearViajesSinRemitoCache_();
+
+  return jsonResponse({ ok: true, row: foundRow, message: "Remito guardado" });
+}
+
+function getViajesSinRemito_() {
+  const cacheKey = "viajes_sin_remito_v1";
+  const cached = getCachedJson_(cacheKey);
+  if (cached && Array.isArray(cached.viajes)) {
+    return jsonResponse({ ok: true, viajes: cached.viajes });
+  }
+
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("Viajes");
+  if (!sheet) {
+    return jsonResponse({ ok: false, message: "No existe la hoja Viajes" });
+  }
+
+  const colMap = getHeaderColumns_(sheet, 3);
+  const nViajeCol = colMap.n_viaje;
+  const fechaCol = colMap.fecha;
+  const salidaCol = colMap.salida;
+  const clienteCol = colMap.cliente;
+  const choferCol = colMap.chofer;
+  const remitoCol = getViajesRemitoColumn_(sheet);
+
+  if (!nViajeCol || !fechaCol || !salidaCol || !clienteCol || !choferCol || !remitoCol) {
+    return jsonResponse({ ok: false, message: "Faltan columnas requeridas en Viajes" });
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 4) {
+    return jsonResponse({ ok: true, viajes: [] });
+  }
+
+  const rowCount = lastRow - 3;
+  const lastCol = sheet.getLastColumn();
+  const data = sheet.getRange(4, 1, rowCount, lastCol).getValues();
+  const viajes = [];
+
+  data.forEach(function (row) {
+    const nViaje = String(row[nViajeCol - 1] || "").trim();
+    const remito = String(row[remitoCol - 1] || "").trim();
+    if (!nViaje || remito) return;
+
+    const fecha = formatFechaDisplay_(row[fechaCol - 1]);
+    const salida = String(row[salidaCol - 1] || "").trim();
+    const cliente = String(row[clienteCol - 1] || "").trim();
+    const chofer = String(row[choferCol - 1] || "").trim();
+
+    const descripcion = [fecha, salida, cliente, chofer].filter(Boolean).join(" - ");
+    viajes.push({
+      id: nViaje,
+      descripcion: descripcion || nViaje,
+    });
+  });
+
+  putCachedJson_(cacheKey, { viajes: viajes }, CACHE_TTL_VIAJES_SIN_REMITO_SECONDS);
+  return jsonResponse({ ok: true, viajes: viajes });
 }
 
 function getHeaderColumns_(sheet, headerRow) {
@@ -355,4 +476,15 @@ function toNumber_(value) {
 
 function round2_(value) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function formatFechaDisplay_(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "dd/MM/yyyy");
+  }
+  return String(value || "").trim();
+}
+
+function clearViajesSinRemitoCache_() {
+  CacheService.getScriptCache().remove("viajes_sin_remito_v1");
 }

@@ -109,10 +109,23 @@ export async function saveGasto(payload) {
   return requestApi({
     action: "save_gasto",
     fecha: payload.fecha,
+    proveedor: payload.proveedor,
     cubiertas: payload.cubiertas || 0,
     adelantoOtros: payload.adelantoOtros || 0,
     ltsComb: payload.ltsComb || 0,
     montoComb: payload.montoComb || 0,
     remitoComb: payload.remitoComb || "",
+  });
+}
+
+export async function fetchViajesSinRemito() {
+  return requestApi({ action: "viajes_sin_remito" });
+}
+
+export async function saveRemito(payload) {
+  return requestApi({
+    action: "save_remito",
+    nViaje: payload.nViaje,
+    remito: payload.remito,
   });
 }

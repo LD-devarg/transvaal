@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" /><base target="_top">
@@ -53,7 +53,7 @@
     <div class="box">Viajes: <b id="t_viajes">0</b></div>
     <div class="box">Total s/IVA: <b id="t_siva">$ 0</b></div>
     <div class="box">Total c/IVA: <b id="t_civa">$ 0</b></div>
-    <div class="box">Saldo Proveedor: <b id="t_saldo">$ 0</b></div>
+    <div class="box">Gastos Período: <b id="t_gastos">$ 0</b></div>
     <div class="box">Adeudado final: <b id="t_final">$ 0</b></div>
   </div>
 
@@ -68,11 +68,6 @@
         <th class="center">Cliente</th>
         <th class="center">Salida</th>
         <th class="center">Tarifa</th>
-        <th class="center">Cubiertas</th>
-        <th class="center">Adelanto</th>
-        <th class="center">Lts</th>
-        <th class="center">$ Comb</th>
-        <th class="center">Total Comb</th>
         <th class="center">Remito</th>
         <th class="center">Estado</th>
       </tr>
@@ -103,6 +98,7 @@
 const fmt = n => Number(n||0).toLocaleString('es-AR',{style:'currency',currency:'ARS'});
 
 let rows = [];
+let gastosPeriodo = 0;
 
 /*==========================*
  * UTILIDADES UI
@@ -153,11 +149,6 @@ function renderTable(data){
       <td class="center">${r.cliente||''}</td>
       <td class="center">${r.salida||''}</td>
       <td class="center">${fmt(r.tarifa)}</td>
-      <td class="center">${fmt(r.cubiertas)}</td>
-      <td class="center">${fmt(r.adelanto)}</td>
-      <td class="center">${r.lts||0}</td>
-      <td class="center">${fmt(r.precioComb)}</td>
-      <td class="center">${fmt(r.totalComb)}</td>
       <td class="center">${r.remito||''}</td>
       <td class="center">${r.estado}</td>
     `;
@@ -181,13 +172,12 @@ function recalcTotals(){
 
   const siva = sel.reduce((a,r)=>a+(+r.tarifa||0),0);
   const civa = siva * 1.21;
-  const saldo= sel.reduce((a,r)=>a+(+r.cubiertas||0)+(+r.adelanto||0)+(+r.totalComb||0),0);
-  const final= civa - saldo;
+  const final= civa - gastosPeriodo;
 
   document.getElementById('t_viajes').textContent = sel.length;
   document.getElementById('t_siva').textContent   = fmt(siva);
   document.getElementById('t_civa').textContent   = fmt(civa);
-  document.getElementById('t_saldo').textContent  = fmt(saldo);
+  document.getElementById('t_gastos').textContent = fmt(gastosPeriodo);
   document.getElementById('t_final').textContent  = fmt(final);
 }
 
@@ -204,9 +194,14 @@ function buscar(){
   showLoading('Buscando viajes...');
 
   google.script.run.withSuccessHandler(data=>{
-    hideLoading();
     rows=data||[];
-    renderTable(rows);
+    google.script.run.withSuccessHandler(total=>{
+      hideLoading();
+      gastosPeriodo = Number(total||0);
+      renderTable(rows);
+    }).withFailureHandler(err=>{
+      hideLoading(); showMsg("Error (gastos): "+err.message,false);
+    }).obtenerGastosPeriodo(proveedor, desde, hasta);
   }).withFailureHandler(err=>{
     hideLoading(); showMsg("Error: "+err.message,false);
   }).obtenerViajesCandidatos(proveedor, desde, hasta);
@@ -238,9 +233,9 @@ function generar(){
     showMsg(
       `Liquidación ${res.numero} generada correctamente.\n` +
       `Viajes: ${res.cantidadViajes}\n` +
+      `Gastos Período: ${fmt(res.totales.gastosPeriodo)}\n` +
       `Total s/IVA: ${fmt(res.totales.totalSinIVA)}\n` +
       `Total c/IVA: ${fmt(res.totales.totalConIVA)}\n` +
-      `Saldo Proveedor: ${fmt(res.totales.saldoProveedor)}\n` +
       `Adeudado Final: ${fmt(res.totales.adeudadoFinal)}`,
       true
     );
@@ -289,3 +284,4 @@ loadProveedores();
 </script>
 </body>
 </html>
+

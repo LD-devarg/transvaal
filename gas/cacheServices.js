@@ -1,18 +1,25 @@
-// Manejo de servicios de caché en la aplicación
+// Manejo de servicios de cache en la aplicacion
 
 function precargarProveedores() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sh = ss.getSheetByName("Proveedores");
-    const last = sh.getLastRow();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName("Proveedores");
+  if (!sh) return [];
 
-    if (last < 2) return; // No hay datos
+  const last = sh.getLastRow();
+  const startRow = 3;
 
-    const data = sh.getRange(2, 1, last - 1, 1).getValues().map(r => r[0]).filter(Boolean);
+  if (last < startRow) return []; // No hay datos
 
-    const cache = CacheService.getScriptCache();
-    cache.put("proveedores", JSON.stringify(data), 21600); // Cache por 6 horas
+  const data = sh
+    .getRange(startRow, 1, last - startRow + 1, 1)
+    .getValues()
+    .map((r) => String(r[0] || "").trim())
+    .filter(Boolean);
 
-    return data;
+  const cache = CacheService.getScriptCache();
+  cache.put("proveedores", JSON.stringify(data), 21600); // Cache por 6 horas
+
+  return data;
 }
 
 function obtenerProveedores() {
@@ -23,8 +30,12 @@ function obtenerProveedores() {
     return JSON.parse(cached);
   }
 
-  // Si no hay cache → recalcular
+  // Si no hay cache -> recalcular
   return precargarProveedores();
+}
+
+function getProveedores() {
+  return obtenerProveedores() || [];
 }
 
 function precargarViajes(proveedor, desdeISO, hastaISO) {
@@ -34,7 +45,7 @@ function precargarViajes(proveedor, desdeISO, hastaISO) {
   const cached = cache.get(clave);
   if (cached) return JSON.parse(cached);
 
-  // Si no existe en cache → calcular
+  // Si no existe en cache -> calcular
   const viajes = obtenerViajesCandidatos(proveedor, desdeISO, hastaISO);
 
   cache.put(clave, JSON.stringify(viajes), 21600);
