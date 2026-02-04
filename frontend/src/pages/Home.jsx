@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import FormViajes from "../components/FormViajes";
 import FormGastos from "../components/FormGastos";
 import FormRemito from "../components/FormRemito";
@@ -12,6 +12,17 @@ export default function Home() {
     const [statusMessage, setStatusMessage] = useState("");
     const [statusType, setStatusType] = useState("");
     const logoSrc = `${import.meta.env.BASE_URL}logo_transvaal.png`;
+
+    useEffect(() => {
+        if (!statusMessage) return undefined;
+
+        const timeoutId = setTimeout(() => {
+            setStatusMessage("");
+            setStatusType("");
+        }, 3000);
+
+        return () => clearTimeout(timeoutId);
+    }, [statusMessage]);
 
     const handleViajeSubmit = async (payload) => {
         setIsSubmitting(true);
@@ -65,24 +76,24 @@ export default function Home() {
     return (
         <div className='flex h-full w-full flex-col items-center justify-start gap-6 overflow-y-hidden pt-5 bg-gray-100 dark:bg-gray-900'>
             <img src={logoSrc} className='h-30 w-30 rounded-full' alt="Logo" />
-            <div className="flex w-full gap-4 justify-center flex-row">
+            <div className="flex w-100 gap-4 justify-center flex-row">
                 <Button
                     onClick={() => setActiveForm("viajes")}
                     className={`btn ${activeForm === "viajes" ? "btn-active" : "btn-inactive"}`}
                 >
-                    Nuevo Viaje
+                    Viajes
                 </Button>
                 <Button
                     onClick={() => setActiveForm("gastos")}
                     className={`btn ${activeForm === "gastos" ? "btn-active" : "btn-inactive"}`}
                 >
-                    Cargar Gastos
+                    Gastos
                 </Button>
                 <Button
                     onClick={() => setActiveForm("remitos")}
                     className={`btn ${activeForm === "remitos" ? "btn-active" : "btn-inactive"}`}
                 >
-                    Registrar Remitos
+                    Remitos
                 </Button>
             </div>
 

@@ -5,7 +5,7 @@
     background-color: #007bff;
     color: white;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 14px;
     transition: background-color 0.3s ease;
 }
 
@@ -29,4 +29,11 @@
 
 .btn-inactive {
     opacity: 0.85;
+}
+
+@media (max-width: 768px) {
+    .btn {
+        width: 100%;
+        font-size: 12px;
+    }
 }

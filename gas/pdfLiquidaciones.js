@@ -1,333 +1,409 @@
-/********************************************************************
- *  pdfLiquidaciones.js
- *  Generación de PDF + Envío de Email para Liquidaciones
- *
- *  ENCABEZADO:
- *    {{Liq_N}}
- *    {{Fecha_Liq}}
- *    {{Chofer}}
- *    {{Patente}}
- *    {{Desde}}
-     {{Hasta}}
- *
- *  DETALLE (tabla nº2 en el body):
- *    {{DET_FECHA}}
- *    {{DET_SALIDA}}
- *    {{DET_CLIENTE}}
- *    {{DET_ADEL}}
- *    {{DET_CUB}}
- *    {{DET_COMB}}
- *    {{DET_TARIFA}}
- *
- *  TOTALES (footer):
- *    {{TOTAL_SIVA}}
- *    {{TOTAL_CIVA}}
- *    {{DESCUENTOS}}
- *    {{TOTAL}}
+﻿/********************************************************************
+ * pdfLiquidaciones.js
+ * Build a single PDF with 2 pages:
+ *  - Page 1: Viajes
+ *  - Page 2: Gastos
  ********************************************************************/
 
-const PDF_DOC_TEMPLATE_ID = '1-Ex7nRUSY24kfKoAHKaeKYmo0yk2JX2wnFKwjKsEtD4';
-const PDF_DEST_FOLDER_ID  = '1O1jkcIEs3IhA3KveV1RA0v01yNXnfpCD';
-const TIMEZONE            = "America/Argentina/Buenos_Aires";
-const IVA                 = 0.21;
+const PDF_VIAJES_TEMPLATE_ID = '1-Ex7nRUSY24kfKoAHKaeKYmo0yk2JX2wnFKwjKsEtD4';
+const PDF_GASTOS_TEMPLATE_ID = '1_661bTvPniWO0YyYsdQdhhvINYGHjWgmRZ7PPCyPPSg';
+const PDF_DEST_FOLDER_ID = '1O1jkcIEs3IhA3KveV1RA0v01yNXnfpCD';
+const PDF_TIMEZONE = 'America/Argentina/Buenos_Aires';
 
-/********************************************************************
- * FORMATEADORES
- ********************************************************************/
-function formatFechaDMY(value) {
-  if (value instanceof Date) {
-    return Utilities.formatDate(value, TIMEZONE, "dd/MM/yyyy");
-  }
-
-  if (!value || value === "") return "";
-
-  // Si viene un string tipo yyyy-mm-dd → convertir a Date
-  const parts = value.toString().split("-");
-  if (parts.length === 3) {
-    const d = new Date(parts[0], parts[1] - 1, parts[2]);
-    return Utilities.formatDate(d, TIMEZONE, "dd/MM/yyyy");
-  }
-
-  // Si viene cualquier otra cosa, intentar parsear
-  const d2 = new Date(value);
-  if (!isNaN(d2.getTime())) {
-    return Utilities.formatDate(d2, TIMEZONE, "dd/MM/yyyy");
-  }
-
-  return ""; // si nada funciona
-}
-
-
-function formatARS(n) {
-  n = Number(n || 0);
-  return n.toLocaleString("es-AR", {
-    style: "currency",
-    currency: "ARS",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
-}
-
-/********************************************************************
- * PUBLIC: Generar PDF
- ********************************************************************/
 function generarPDFLiquidacion(nroLiq) {
+  const numero = String(nroLiq || '').trim();
+  if (!numero) throw new Error('Numero de liquidacion invalido');
 
-  console.log("=== INICIO generarPDFLiquidacion ===");
-  console.log(">> nroLiq recibido:", nroLiq);
-
-  // 1) Obtener datos consolidados
-  console.log(">> Llamando _pdf_obtenerDatos...");
-  const data = _pdf_obtenerDatos(nroLiq);
-  console.log(">> Resultado _pdf_obtenerDatos:", JSON.stringify(data));
-
-  if (!data) {
-    console.error("ERROR: _pdf_obtenerDatos devolvió null");
-    throw new Error("No se encontró la liquidación " + nroLiq);
-  }
-
-  // 2) Obtener plantilla
-  console.log(">> Obteniendo plantilla PDF_DOC_TEMPLATE_ID:", PDF_DOC_TEMPLATE_ID);
-  const tpl = DriveApp.getFileById(PDF_DOC_TEMPLATE_ID);
-  console.log(">> Plantilla encontrada:", tpl.getName());
-
-  // 3) Copiar plantilla
-  console.log(">> Copiando plantilla a carpeta destino:", PDF_DEST_FOLDER_ID);
-  const copy = tpl.makeCopy(`Liquidación_${nroLiq}`, DriveApp.getFolderById(PDF_DEST_FOLDER_ID));
-  console.log(">> Copia creada con ID:", copy.getId());
-
-  const doc = DocumentApp.openById(copy.getId());
-  console.log(">> Documento abierto correctamente.");
-
-  const body = doc.getBody();
-  const header = doc.getHeader();
-  const footer = doc.getFooter();
-
-  // 4) Reemplazo de encabezado
-  console.log(">> Reemplazando encabezado...");
-  header.replaceText('{{Liq_N}}', nroLiq);
-  header.replaceText('{{Fecha_Liq}}', data.fechaDMY);
-
-  body.replaceText('{{Chofer}}', data.proveedor);
-  body.replaceText('{{Patente}}', data.patente);
-  body.replaceText('{{Desde}}', data.desdeDMY);
-  body.replaceText('{{Hasta}}', data.hastaDMY);
-
-  // 5) Insertar detalle
-  console.log(">> Insertando detalle. Cantidad filas:", data.detalle.length);
-  _pdf_insertarDetalle(doc, data.detalle);
-  console.log(">> Detalle insertado.");
-
-  // 6) Totales
-  console.log(">> Insertando totales...");
-  footer.replaceText('{{TOTAL_SIVA}}', formatARS(data.totalSIVA));
-  footer.replaceText('{{TOTAL_CIVA}}', formatARS(data.totalCIVA));
-  footer.replaceText('{{DESCUENTOS}}', formatARS(data.descuentos));
-  footer.replaceText('{{TOTAL}}', formatARS(data.totalFinal));
-  console.log(">> Totales insertados.");
-
-  doc.saveAndClose();
-  console.log(">> Documento guardado.");
-
-  // 7) Convertir a PDF
-  console.log(">> Generando PDF...");
-  const pdfBlob = copy.getAs(MimeType.PDF);
-  console.log(">> PDF generado. Tamaño:", pdfBlob.getBytes().length);
-
-  pdfBlob.setName(`Liquidación_${nroLiq}.pdf`);
-
+  const data = _pdfGetLiquidacionData_(numero);
   const folder = DriveApp.getFolderById(PDF_DEST_FOLDER_ID);
+
+  const viajesDocFile = DriveApp.getFileById(PDF_VIAJES_TEMPLATE_ID)
+    .makeCopy('Liquidacion_' + numero + '_tmp_viajes', folder);
+  const gastosDocFile = DriveApp.getFileById(PDF_GASTOS_TEMPLATE_ID)
+    .makeCopy('Liquidacion_' + numero + '_tmp_gastos', folder);
+
+  const viajesDoc = DocumentApp.openById(viajesDocFile.getId());
+  const gastosDoc = DocumentApp.openById(gastosDocFile.getId());
+
+  _pdfFillViajesTemplate_(viajesDoc, data);
+  _pdfFillGastosTemplate_(gastosDoc, data);
+
+  viajesDoc.saveAndClose();
+  gastosDoc.saveAndClose();
+
+  const mergeDoc = DocumentApp.openById(viajesDocFile.getId());
+  const mergeBody = mergeDoc.getBody();
+  const gastosBody = DocumentApp.openById(gastosDocFile.getId()).getBody();
+
+  mergeBody.appendPageBreak();
+  _pdfAppendBodyElements_(mergeBody, gastosBody);
+  mergeDoc.saveAndClose();
+
+  const pdfBlob = viajesDocFile.getAs(MimeType.PDF).setName('Liquidacion_' + numero + '.pdf');
   const pdfFile = folder.createFile(pdfBlob);
 
-  // 8) Eliminar copia DOC
-  console.log(">> Eliminando copia temporal DOC...");
-  DriveApp.getFileById(copy.getId()).setTrashed(true);
+  DriveApp.getFileById(viajesDocFile.getId()).setTrashed(true);
+  DriveApp.getFileById(gastosDocFile.getId()).setTrashed(true);
 
-  // 9) Enviar email
-  console.log(">> Enviando email a:", data.email);
-  _pdf_enviarEmail(data.email, nroLiq, pdfBlob);
-  console.log(">> Email enviado.");
-
-  console.log("=== FIN generarPDFLiquidacion ===");
+  _pdfEnviarEmail_(data.email, numero, pdfBlob);
 
   return { pdfUrl: pdfFile.getUrl() };
 }
 
+function _pdfGetLiquidacionData_(nroLiq) {
+  const sh = SpreadsheetApp.getActive().getSheetByName('Liquidaciones');
+  if (!sh) throw new Error('No existe hoja Liquidaciones');
 
-/********************************************************************
- * Obtener datos completos de cabecera + detalle + totales
- ********************************************************************/
-function _pdf_obtenerDatos(nLiq) {
+  const last = sh.getLastRow();
+  if (last < 4) throw new Error('No hay liquidaciones cargadas');
 
-  console.log(">> _pdf_obtenerDatos INICIO para:", nLiq);
-
-  const shL = SpreadsheetApp.getActive().getSheetByName("Liquidaciones");
-  const last = shL.getLastRow();
-
-  console.log(">> Liquidaciones lastRow:", last);
-
-  const rows = shL.getRange(4,1,last-3, shL.getLastColumn()).getValues();
-  console.log(">> Cantidad de filas leídas:", rows.length);
-
+  const values = sh.getRange(4, 1, last - 3, sh.getLastColumn()).getValues();
   let cab = null;
 
-  rows.forEach((r, idx) => {
-    console.log(`>>> Revisando fila ${idx+4}:`, r[1]);
+  values.some(function (row) {
+    if (String(row[1] || '').trim() !== nroLiq) return false; // B
 
-    if (String(r[1]) === nLiq) {
+    cab = {
+      nro: nroLiq,
+      fecha: row[2],
+      fechaDMY: _pdfFormatFechaDMY_(row[2]),
+      proveedor: String(row[3] || '').trim(),
+      desde: row[4],
+      desdeDMY: _pdfFormatFechaDMY_(row[4]),
+      hasta: row[5],
+      hastaDMY: _pdfFormatFechaDMY_(row[5]),
+      gastosPeriodo: _pdfToNumber_(row[6]),
+      totalSIVA: _pdfToNumber_(row[7]),
+      totalCIVA: _pdfToNumber_(row[8]),
+      totalFinal: _pdfToNumber_(row[9]),
+    };
 
-      console.log(">>> Coincidencia encontrada en fila:", idx+4);
-
-      cab = {
-        nro: nLiq,
-        fecha: r[2],
-        fechaDMY: formatFechaDMY(r[2]),
-        proveedor: r[3],
-        desde: r[4],
-        desdeDMY: r[4] ? formatFechaDMY(r[4]) : "",
-        hasta: r[5],
-        hastaDMY: r[5] ? formatFechaDMY(r[5]) : "",
-        totalSIVA: Number(r[7] || 0),
-        totalCIVA: Number(r[8] || 0),
-        totalFinal: Number(r[9] || 0)
-      };
-    }
+    return true;
   });
 
-  console.log(">> CAB encontrada:", cab);
+  if (!cab) throw new Error('No existe la liquidacion ' + nroLiq);
 
-  if (!cab) throw new Error("No existe la cabecera de la liquidación.");
+  const viajes = _pdfGetViajesDetalle_(nroLiq);
+  const gastos = _pdfGetGastosDetalle_(cab.proveedor, cab.desde, cab.hasta);
+  const gastosCalc = gastos.reduce(function (acc, g) {
+    return acc + g.cubiertas + g.adelanto + g.totalComb;
+  }, 0);
+  const descuentos = cab.gastosPeriodo || gastosCalc;
+  const provData = _pdfGetProveedorData_(cab.proveedor);
 
-  const detalle = _pdf_obtenerDetalle(nLiq);
-  console.log(">> Detalle obtenido:", detalle.length);
-
-  const descuentos = detalle.reduce((acc, d) =>
-    acc + d.adelanto + d.cubiertas + d.combustible, 0);
-
-  const { email, patente } = _pdf_datosProveedor(cab.proveedor);
-
-  return { ...cab, descuentos, detalle, email, patente };
+  return {
+    nro: cab.nro,
+    fechaDMY: cab.fechaDMY,
+    proveedor: cab.proveedor,
+    desdeDMY: cab.desdeDMY,
+    hastaDMY: cab.hastaDMY,
+    totalSIVA: cab.totalSIVA,
+    totalCIVA: cab.totalCIVA,
+    totalFinal: cab.totalFinal,
+    descuentos: descuentos,
+    viajes: viajes,
+    gastos: gastos,
+    patente: provData.patente,
+    email: provData.email,
+  };
 }
 
+function _pdfGetViajesDetalle_(nroLiq) {
+  const sh = SpreadsheetApp.getActive().getSheetByName('Liquidaciones_Detalle');
+  if (!sh) return [];
 
-/********************************************************************
- * Leer detalle desde Liquidaciones_Detalle
- ********************************************************************/
-function _pdf_obtenerDetalle(nLiq) {
-
-  console.log(">> _pdf_obtenerDetalle INICIO para:", nLiq);
-
-  const sh = SpreadsheetApp.getActive().getSheetByName("Liquidaciones_Detalle");
   const last = sh.getLastRow();
+  if (last < 4) return [];
 
-  console.log(">> Liquidaciones_Detalle lastRow:", last);
-
-  const rows = sh.getRange(4,1,last-3, sh.getLastColumn()).getValues();
-  console.log(">> Cantidad de filas leídas:", rows.length);
-
+  const values = sh.getRange(4, 1, last - 3, sh.getLastColumn()).getValues();
   const out = [];
 
-  rows.forEach((r, idx) => {
-    if (String(r[1]) === nLiq) {
-      console.log(">>> Detalle encontrado en fila:", idx+4);
+  values.forEach(function (row) {
+    if (String(row[1] || '').trim() !== nroLiq) return; // B
 
-      out.push({
-        fecha: formatFechaDMY(r[4]),
-        salida: r[7],
-        cliente: r[6],
-        remito: r[7],
-        cubiertas: Number(r[9] || 0),
-        adelanto: Number(r[10] || 0),
-        combustible: Number(r[13] || 0),
-        tarifa: Number(r[14] || 0)
-      });
-    }
+    out.push({
+      fecha: _pdfFormatFechaDMY_(row[4]),      // E Fecha Viaje
+      salida: String(row[7] || '').trim(),     // H Salida
+      remito: String(row[8] || '').trim(),     // I Remito Viaje
+      cliente: String(row[6] || '').trim(),    // G Cliente
+      tarifa: _pdfToNumber_(row[9]),           // J Tarifa s/IVA
+    });
   });
-
-  console.log(">> Detalle total:", out.length);
 
   return out;
 }
 
+function _pdfGetGastosDetalle_(proveedor, desdeRaw, hastaRaw) {
+  const sh = SpreadsheetApp.getActive().getSheetByName('Gastos');
+  if (!sh) return [];
 
-/********************************************************************
- * Insertar detalle en tabla #2
- ********************************************************************/
-function _pdf_insertarDetalle(doc, detalleRows) {
-  const body = doc.getBody();
-  const tables = body.getTables();
+  const last = sh.getLastRow();
+  if (last < 4) return [];
 
-  if (tables.length < 2) throw new Error("La plantilla no tiene tabla #2.");
+  const desde = _pdfToDate_(desdeRaw);
+  const hasta = _pdfToDate_(hastaRaw);
 
-  const table = tables[1];
+  const values = sh.getRange(4, 1, last - 3, 8).getValues(); // A:H
+  const out = [];
 
-  // Fila plantilla = fila 1 (la que tiene {{DET_*}})
-  const templateRow = table.getRow(1).copy();  
+  values.forEach(function (row) {
+    const fecha = _pdfToDate_(row[0]);
+    const chofer = String(row[1] || '').trim();
 
-  // Borrar filas previas (dejamos encabezado y plantilla)
-  while (table.getNumRows() > 2) {
-    table.removeRow(2);
-  }
+    if (!fecha) return;
+    if (String(chofer).toLowerCase() !== String(proveedor || '').trim().toLowerCase()) return;
+    if (!_pdfIsDateInRange_(fecha, desde, hasta)) return;
 
-  // Insertar filas
-  detalleRows.forEach(d => {
-    const newRow = templateRow.copy();
-
-    newRow.replaceText('{{DET_FECHA}}', d.fecha);
-    newRow.replaceText('{{DET_SALIDA}}', d.salida);
-    newRow.replaceText('{{DET_CLIENTE}}', d.cliente);
-    newRow.replaceText('{{DET_ADEL}}', formatARS(d.adelanto));
-    newRow.replaceText('{{DET_CUB}}', formatARS(d.cubiertas));
-    newRow.replaceText('{{DET_COMB}}', formatARS(d.combustible));
-    newRow.replaceText('{{DET_TARIFA}}', formatARS(d.tarifa));
-
-    table.appendTableRow(newRow);
+    out.push({
+      fecha: _pdfFormatFechaDMY_(row[0]),
+      cubiertas: _pdfToNumber_(row[2]),
+      adelanto: _pdfToNumber_(row[3]),
+      ltsComb: _pdfToNumber_(row[4]),
+      montoComb: _pdfToNumber_(row[5]),
+      totalComb: _pdfToNumber_(row[6]),
+      remitoComb: String(row[7] || '').trim(),
+    });
   });
 
-  // borrar plantilla
-  table.removeRow(1);
+  return out;
 }
 
+function _pdfFillViajesTemplate_(doc, data) {
+  _pdfReplaceInDoc_(doc, '{{Liq_N}}', data.nro);
+  _pdfReplaceInDoc_(doc, '{{Fecha_Liq}}', data.fechaDMY);
+  _pdfReplaceInDoc_(doc, '{{Chofer}}', data.proveedor);
+  _pdfReplaceInDoc_(doc, '{{Patente}}', data.patente || '');
+  _pdfReplaceInDoc_(doc, '{{Desde}}', data.desdeDMY);
+  _pdfReplaceInDoc_(doc, '{{Hasta}}', data.hastaDMY);
 
-/********************************************************************
- * Datos del proveedor
- ********************************************************************/
-function _pdf_datosProveedor(nombre) {
+  _pdfReplaceInDoc_(doc, '{{TOTAL_SIVA}}', _pdfFormatARS_(data.totalSIVA));
+  _pdfReplaceInDoc_(doc, '{{TOTAL_CIVA}}', _pdfFormatARS_(data.totalCIVA));
+  _pdfReplaceInDoc_(doc, '{{DESCUENTOS}}', _pdfFormatARS_(data.descuentos));
+  _pdfReplaceInDoc_(doc, '{{TOTAL}}', _pdfFormatARS_(data.totalFinal));
 
-  const sh = SpreadsheetApp.getActive().getSheetByName("Proveedores");
-  const last = sh.getLastRow();
-  if (last < 2) return { email: "", patente: "" };
+  _pdfInsertTableRows_(doc.getBody(), data.viajes, ['{{DET_FECHA}}', '{{DET_SALIDA}}', '{{DET_REMITO}}', '{{DET_CLIENTE}}', '{{DET_TARIFA}}'], function (row, item) {
+    row.replaceText('{{DET_FECHA}}', item.fecha);
+    row.replaceText('{{DET_SALIDA}}', item.salida);
+    row.replaceText('{{DET_REMITO}}', item.remito);
+    row.replaceText('{{DET_CLIENTE}}', item.cliente);
+    row.replaceText('{{DET_TARIFA}}', _pdfFormatARS_(item.tarifa));
+  });
+}
 
-  const rows = sh.getRange(2,1,last-1, sh.getLastColumn()).getValues();
-  const target = nombre.toLowerCase().trim();
+function _pdfFillGastosTemplate_(doc, data) {
+  _pdfReplaceInDoc_(doc, '{{Chofer}}', data.proveedor);
+  _pdfReplaceInDoc_(doc, '{{Patente}}', data.patente || '');
+  _pdfReplaceInDoc_(doc, '{{Desde}}', data.desdeDMY);
+  _pdfReplaceInDoc_(doc, '{{Hasta}}', data.hastaDMY);
 
-  for (let r of rows) {
-    const prov = String(r[0] || "").toLowerCase().trim();
-    if (prov === target) {
-      return {
-        patente: r[1] || "",
-        email: r[3] || ""
-      };
+  _pdfReplaceInDoc_(doc, '{{DESCUENTOS}}', _pdfFormatARS_(data.descuentos));
+
+  _pdfInsertTableRows_(doc.getBody(), data.gastos, ['{{DET_FECHA}}', '{{DET_CUB}}', '{{DET_ADEL}}', '{{DET_LTCOMB}}', '{{DET_PCOMB}}', '{{DET_TOTALCOMB}}', '{{DET_RCOMB}}'], function (row, item) {
+    row.replaceText('{{DET_FECHA}}', item.fecha);
+    row.replaceText('{{DET_CUB}}', _pdfFormatARS_(item.cubiertas));
+    row.replaceText('{{DET_ADEL}}', _pdfFormatARS_(item.adelanto));
+    row.replaceText('{{DET_LTCOMB}}', _pdfFormatNumber_(item.ltsComb));
+    row.replaceText('{{DET_PCOMB}}', _pdfFormatARS_(item.montoComb));
+    row.replaceText('{{DET_TOTALCOMB}}', _pdfFormatARS_(item.totalComb));
+    row.replaceText('{{DET_RCOMB}}', item.remitoComb);
+  });
+}
+
+function _pdfInsertTableRows_(body, rows, tokenCandidates, replaceFn) {
+  const found = _pdfFindTemplateTableRow_(body, tokenCandidates);
+  if (!found) throw new Error('No se encontro la fila plantilla de detalle');
+
+  const table = found.table;
+  const templateRowIndex = found.rowIndex;
+  const templateRow = table.getRow(templateRowIndex).copy();
+
+  while (table.getNumRows() > templateRowIndex) {
+    table.removeRow(templateRowIndex);
+  }
+
+  const safeRows = rows && rows.length ? rows : [null];
+  safeRows.forEach(function (item) {
+    const newRow = templateRow.copy();
+    replaceFn(newRow, item || {
+      fecha: '', salida: '', remito: '', cliente: '', tarifa: 0,
+      cubiertas: 0, adelanto: 0, ltsComb: 0, montoComb: 0, totalComb: 0, remitoComb: ''
+    });
+    table.appendTableRow(newRow);
+  });
+}
+
+function _pdfFindTemplateTableRow_(body, tokenCandidates) {
+  const tokens = tokenCandidates || [];
+  const tables = body.getTables();
+
+  for (var t = 0; t < tables.length; t++) {
+    var table = tables[t];
+    for (var r = 0; r < table.getNumRows(); r++) {
+      var rowText = table.getRow(r).getText();
+      var hasToken = tokens.some(function (token) {
+        return rowText.indexOf(token) !== -1;
+      });
+      if (hasToken) {
+        return { table: table, rowIndex: r };
+      }
     }
   }
-  return { email: "", patente: "" };
+
+  return null;
 }
 
-/********************************************************************
- * Envío de email
- ********************************************************************/
-function _pdf_enviarEmail(dest, nro, pdfBlob) {
-  if (!dest) {
-    console.log("Proveedor sin email, no se envía.");
-    return;
+function _pdfAppendBodyElements_(targetBody, sourceBody) {
+  for (var i = 0; i < sourceBody.getNumChildren(); i++) {
+    var child = sourceBody.getChild(i).copy();
+    var type = child.getType();
+
+    if (type === DocumentApp.ElementType.PARAGRAPH) {
+      targetBody.appendParagraph(child.asParagraph());
+    } else if (type === DocumentApp.ElementType.TABLE) {
+      targetBody.appendTable(child.asTable());
+    } else if (type === DocumentApp.ElementType.LIST_ITEM) {
+      targetBody.appendListItem(child.asListItem());
+    } else if (type === DocumentApp.ElementType.PAGE_BREAK) {
+      targetBody.appendPageBreak();
+    } else if (type === DocumentApp.ElementType.HORIZONTAL_RULE) {
+      targetBody.appendHorizontalRule();
+    }
   }
+}
+
+function _pdfReplaceInDoc_(doc, token, value) {
+  var text = String(value == null ? '' : value);
+
+  var header = doc.getHeader();
+  if (header) header.replaceText(token, text);
+
+  doc.getBody().replaceText(token, text);
+
+  var footer = doc.getFooter();
+  if (footer) footer.replaceText(token, text);
+}
+
+function _pdfGetProveedorData_(nombre) {
+  const sh = SpreadsheetApp.getActive().getSheetByName('Proveedores');
+  if (!sh) return { email: '', patente: '' };
+
+  const last = sh.getLastRow();
+  if (last < 3) return { email: '', patente: '' };
+
+  const headers = sh.getRange(2, 1, 1, sh.getLastColumn()).getValues()[0];
+  const map = {};
+  headers.forEach(function (h, idx) {
+    const key = _pdfNormalizeHeader_(h);
+    if (key) map[key] = idx + 1;
+  });
+
+  const nameCol = map.nombre || 1;
+  const patenteCol = map.patente || 8;
+  const mailCol = map.mail || 9;
+
+  const rows = sh.getRange(3, 1, last - 2, sh.getLastColumn()).getValues();
+  const target = String(nombre || '').trim().toLowerCase();
+
+  for (var i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const prov = String(row[nameCol - 1] || '').trim().toLowerCase();
+    if (prov !== target) continue;
+
+    return {
+      patente: String(row[patenteCol - 1] || '').trim(),
+      email: String(row[mailCol - 1] || '').trim(),
+    };
+  }
+
+  return { email: '', patente: '' };
+}
+
+function _pdfEnviarEmail_(dest, nro, pdfBlob) {
+  if (!dest) return;
 
   MailApp.sendEmail({
     to: dest,
-    subject: `Liquidación N° ${nro}`,
-    body: `Adjunto PDF de la liquidación N° ${nro}.`,
-    attachments: [pdfBlob]
+    subject: 'Liquidacion Nro ' + nro,
+    body: 'Adjunto PDF de la liquidacion Nro ' + nro + '.',
+    attachments: [pdfBlob],
   });
+}
 
-  console.log(`Email enviado a ${dest}`);
+function _pdfFormatFechaDMY_(value) {
+  const d = _pdfToDate_(value);
+  if (!d) return '';
+  return Utilities.formatDate(d, PDF_TIMEZONE, 'dd/MM/yyyy');
+}
+
+function _pdfFormatARS_(n) {
+  const value = Number(n || 0);
+  return value.toLocaleString('es-AR', {
+    style: 'currency',
+    currency: 'ARS',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function _pdfFormatNumber_(n) {
+  const value = Number(n || 0);
+  return value.toLocaleString('es-AR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+function _pdfToNumber_(value) {
+  if (typeof value === 'number') return isNaN(value) ? 0 : value;
+
+  const cleaned = String(value == null ? '' : value)
+    .replace(/\$/g, '')
+    .replace(/\./g, '')
+    .replace(/,/g, '.')
+    .trim();
+
+  if (!cleaned) return 0;
+  const parsed = Number(cleaned);
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+function _pdfToDate_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw) return null;
+
+  const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) {
+    return new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+  }
+
+  const dmy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) {
+    return new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
+  }
+
+  const parsed = new Date(raw);
+  if (isNaN(parsed.getTime())) return null;
+
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
+function _pdfIsDateInRange_(date, desde, hasta) {
+  if (!date) return false;
+  if (desde && date < desde) return false;
+  if (hasta && date > hasta) return false;
+  return true;
+}
+
+function _pdfNormalizeHeader_(value) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
 }
